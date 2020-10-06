@@ -231,7 +231,7 @@ void CSerial::init() {
     printf("Could not open socket to listen on!\n");
   }
 
-  inet_aton(listenAddress, (in_addr *) &Address.sin_addr.s_addr);
+  inet_aton(listenAddress, (in_addr *)&Address.sin_addr.s_addr);
   Address.sin_port = htons((u16)(listenPort));
   Address.sin_family = AF_INET;
 

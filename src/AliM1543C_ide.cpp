@@ -418,19 +418,19 @@ void CAliM1543C_ide::init() {
 
   // start controller threads
   StopThread = false;
-  mtRegisters[0] = new CRWLock("ide0-registers");
-  mtRegisters[1] = new CRWLock("ide1-registers");
-  mtBusMaster[0] = new CRWLock("ide0-busmaster");
-  mtBusMaster[1] = new CRWLock("ide1-busmaster");
+  mtRegisters[0] = new QReadWriteLock();
+  mtRegisters[1] = new QReadWriteLock();
+  mtBusMaster[0] = new QReadWriteLock();
+  mtBusMaster[1] = new QReadWriteLock();
 
   for (int i = 0; i < 2; i++) {
-    semController[i] = new CSemaphore(0, 1); // disk controller
-    semControllerReady[i] = new CSemaphore(0, 1); // disk controller ready
-    semBusMaster[i] = new CSemaphore(0, 1);  // bus master
-    semBusMasterReady[i] = new CSemaphore(0, 1);  // bus master ready
-    semControllerReady[i]->set();
-    semBusMasterReady[i]->set();
-    thrController[i] = 0;
+    semController[i] = new QSemaphore(0);       // disk controller
+    semControllerReady[i] = new QSemaphore(0);  // disk controller ready
+    semBusMaster[i] = new QSemaphore(0);        // bus master
+    semBusMasterReady[i] = new QSemaphore(0);   // bus master ready
+    semControllerReady[i]->release();
+    semBusMasterReady[i]->release();
+    thrController[i] = nullptr;
   }
 
   printf("%%IDE-I-INIT: New IDE emulator initialized.\n");
@@ -441,10 +441,9 @@ void CAliM1543C_ide::start_threads() {
   for (int i = 0; i < 2; i++) {
     if (!thrController[i]) {
       sprintf(buffer, "ide%d", i);
-      thrController[i] = new CThread(buffer);
-      printf(" %s", thrController[i]->getName().c_str());
+      thrController[i] = new CAliM1543C_ide_Thread(this);
       StopThread = false;
-      thrController[i]->start(*this);
+      thrController[i]->start();
     }
   }
 }
@@ -453,11 +452,9 @@ void CAliM1543C_ide::stop_threads() {
   StopThread = true;
   for (int i = 0; i < 2; i++) {
     if (thrController[i]) {
-      printf(" %s", thrController[i]->getName().c_str());
-      semController[i]->set();
-      thrController[i]->join();
-      delete thrController[i];
-      thrController[i] = 0;
+      semController[i]->release();
+      thrController[i]->wait();
+      thrController[i] = nullptr;
     }
   }
 }
@@ -727,8 +724,8 @@ u32 CAliM1543C_ide::ide_command_read(int index, u32 address, int dsize) {
         SEL_STATUS(index).busy = true;
         SEL_STATUS(index).drive_ready = false;
         UPDATE_ALT_STATUS(index);
-        semControllerReady[index]->wait();
-        semController[index]->set(); // wake up the controller.
+        semControllerReady[index]->acquire();
+        semController[index]->release(); // wake up the controller.
 #if defined(DEBUG_IDE_MULTIPLE) || defined(DEBUG_IDE_PACKET)
         printf("Command still in progress, waking up controller.\n");
         printf("-- Packet Phase: %d\n", SEL_COMMAND(index).packet_phase);
@@ -832,8 +829,8 @@ void CAliM1543C_ide::ide_command_write(int index, u32 address, int dsize,
       SEL_STATUS(index).drq = false;
       SEL_STATUS(index).busy = true;
       UPDATE_ALT_STATUS(index);
-      semControllerReady[index]->wait();
-      semController[index]->set(); // wake the controller up.
+      semControllerReady[index]->acquire();
+      semController[index]->release(); // wake the controller up.
     }
 
     if (CONTROLLER(index).data_ptr > IDE_BUFFER_SIZE) {
@@ -918,8 +915,8 @@ void CAliM1543C_ide::ide_command_write(int index, u32 address, int dsize,
       UPDATE_ALT_STATUS(index);
       SEL_COMMAND(index).command_in_progress = true;
       SEL_COMMAND(index).packet_phase = PACKET_NONE;
-      semControllerReady[index]->wait();
-      semController[index]->set(); // wake up the controller.
+      semControllerReady[index]->acquire();
+      semController[index]->release(); // wake up the controller.
     } else {
 
       // this is a nop, so we cancel everything that's pending and
@@ -935,8 +932,9 @@ u32 CAliM1543C_ide::ide_control_read(int index, u32 address) {
   u32 data = 0;
   switch (address) {
   case 0: {
-    SCOPED_READ_LOCK(mtRegisters[index]);
+    mtRegisters[index]->lockForRead();
     data = SEL_STATUS(index).alt_status;
+    mtRegisters[index]->unlock();
   }
 #ifdef DEBUG_IDE_REG_CONTROL
     static u32 last_data = 0;
@@ -1095,8 +1093,8 @@ void CAliM1543C_ide::ide_busmaster_write(int index, u32 address, u32 data,
 
       // set the status register
       CONTROLLER(index).busmaster[2] |= 0x01;
-      semBusMasterReady[index]->wait();
-      semBusMaster[index]->set(); // wake up the controller for busmastering
+      semBusMasterReady[index]->acquire();
+      semBusMaster[index]->release(); // wake up the controller for busmastering
     } else {
 
       // clear the status register
@@ -1175,8 +1173,9 @@ void CAliM1543C_ide::raise_interrupt(int index) {
 
 #if !defined(IDE_YIELD_INTERRUPTS)
     {
-      SCOPED_WRITE_LOCK(mtBusMaster[index]);
+      mtBusMaster[index]->lockForWrite();
       CONTROLLER(index).busmaster[2] |= 0x04;
+      mtBusMaster[index]->unlock();
     }
     UPDATE_ALT_STATUS(index);
     theAli->pic_interrupt(1, 6 + index);
@@ -2375,10 +2374,11 @@ int CAliM1543C_ide::do_dma_transfer(int index, u8 *buffer, u32 buffersize,
   u8 status = 0;
   u8 count = 0;
   u32 prd;
-  semBusMaster[index]->wait(); // wait until the start bit is set.
+  semBusMaster[index]->acquire(); // wait until the start bit is set.
   {
-    SCOPED_READ_LOCK(mtBusMaster[index]);
+    mtBusMaster[index]->lockForRead();
     prd = endian_32(*(u32 *)(&CONTROLLER(index).busmaster[4]));
+    mtBusMaster[index]->unlock();
   }
   do {
     u32 base;
@@ -2433,8 +2433,9 @@ int CAliM1543C_ide::do_dma_transfer(int index, u8 *buffer, u32 buffersize,
   switch (status) {
   case 0: // normal completion.
   {
-    SCOPED_WRITE_LOCK(mtBusMaster[index]);
+    mtBusMaster[index]->lockForWrite();
     CONTROLLER(index).busmaster[2] &= 0xfe; // clear active.
+    mtBusMaster[index]->unlock();
   }
 
     raise_interrupt(index);
@@ -2442,8 +2443,9 @@ int CAliM1543C_ide::do_dma_transfer(int index, u8 *buffer, u32 buffersize,
 
   case 1: // PRD is smaller than the data we have.
   {
-    SCOPED_WRITE_LOCK(mtBusMaster[index]);
+    mtBusMaster[index]->lockForWrite();
     CONTROLLER(index).busmaster[2] &= 0xfe; // clear active.
+    mtBusMaster[index]->unlock();
   }
 
   // do not raise an interrupt
@@ -2455,19 +2457,21 @@ int CAliM1543C_ide::do_dma_transfer(int index, u8 *buffer, u32 buffersize,
     break;
   }
 
-  semBusMasterReady[index]->set();
+  semBusMasterReady[index]->release();
   return status;
 }
 
 /**
  * Thread entry point.
  **/
-void CAliM1543C_ide::run() {
-  int index = (thrController[0] == CThread::current()) ? 0 : 1;
+void CAliM1543C_ide_Thread::run() {
+  int index = (parent->thrController[0] == QThread::currentThread()) ? 0 : 1;
+  auto &state = parent->state;
+
   try {
     for (;;) {
-      semController[index]->wait();
-      if (StopThread)
+      parent->semController[index]->acquire();
+      if (parent->StopThread)
         return;
       {
 #ifdef DEBUG_IDE_THREADS
@@ -2475,8 +2479,10 @@ void CAliM1543C_ide::run() {
         ide_status(index);
 #endif
         if (SEL_COMMAND(index).command_in_progress)
-          execute(index);
-        UPDATE_ALT_STATUS(index);
+          parent->execute(index);
+        parent->mtRegisters[index]->lockForWrite();
+        SEL_STATUS(index).alt_status = parent->get_status(index);
+        parent->mtRegisters[index]->unlock();
 
 #ifdef IDE_YIELD_INTERRUPTS
         if (CONTROLLER(index).interrupt_pending) {
@@ -2488,7 +2494,7 @@ void CAliM1543C_ide::run() {
         }
 #endif
       }
-      semControllerReady[index]->set();
+      parent->semControllerReady[index]->release();
     }
   }
 

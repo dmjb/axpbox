@@ -251,7 +251,20 @@
  *(http://download.majix.org/dec/alpha_arch_ref.pdf)
  *	.
  **/
-class CAlphaCPU : public CSystemComponent, public CRunnable {
+class CAlphaCPU;
+
+class CAlphaCPU_Thread : public QThread {
+Q_OBJECT
+  CAlphaCPU *parent;
+
+  void run() override;
+
+public:
+  CAlphaCPU_Thread(CAlphaCPU *parent)
+      : QThread(nullptr), parent(parent){};
+};
+
+class CAlphaCPU : public CSystemComponent {
 public:
   void flush_icache_asm();
   virtual int SaveState(FILE *f);
@@ -260,7 +273,6 @@ public:
   int get_cpuid();
   void flush_icache();
 
-  virtual void run(); // Poco Thread entry point
   void execute();
   void release_threads();
 
@@ -309,8 +321,10 @@ public:
   virtual void stop_threads();
 
 private:
-  CThread *myThread = nullptr;
-  CSemaphore mySemaphore;
+  friend class CAlphaCPU_Thread;
+
+  CAlphaCPU_Thread *myThread = nullptr;
+  QSemaphore mySemaphore;
   bool StopThread;
 
   int get_icache(u64 address, u32 *data);

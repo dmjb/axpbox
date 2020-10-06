@@ -153,24 +153,24 @@ static const u8 ccdat[16][4] = {
  *   - Flush the updated GUI content to the screen
  *   .
  **/
-void CCirrus::run() {
+void CCirrus_Thread::run() {
   try {
     // initialize the GUI (and let it know our tilesize)
-    bx_gui->init(state.x_tilesize, state.y_tilesize);
+    bx_gui->init(parent->state.x_tilesize, parent->state.y_tilesize);
     for (;;) {
       // Terminate thread if StopThread is set to true
-      if (StopThread)
+      if (parent->StopThread)
         return;
       // Handle GUI events (100 times per second)
       for (int i = 0; i < 10; i++) {
         bx_gui->lock();
         bx_gui->handle_events();
         bx_gui->unlock();
-        CThread::sleep(10);
+        QThread::sleep(10);
       }
       // Update the screen (10 times per second)
       bx_gui->lock();
-      update();
+      parent->update();
       bx_gui->flush();
       bx_gui->unlock();
     }
@@ -421,10 +421,9 @@ void CCirrus::init() {
  **/
 void CCirrus::start_threads() {
   if (!myThread) {
-    myThread = new CThread("cirrus");
-    printf(" %s", myThread->getName().c_str());
+    myThread = new CCirrus_Thread(this);
     StopThread = false;
-    myThread->start(*this);
+    myThread->start();
   }
 }
 
@@ -435,9 +434,8 @@ void CCirrus::stop_threads() {
   // Signal the thread to stop
   StopThread = true;
   if (myThread) {
-    printf(" %s", myThread->getName().c_str());
     // Wait for the thread to end execution
-    myThread->join();
+    myThread->wait();
     // And delete the Thread object
     delete myThread;
     myThread = 0;

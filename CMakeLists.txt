@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.10)
 project(AXPBox VERSION 0.1)
 
+# Qt
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+
+find_package(Qt5 COMPONENTS Core REQUIRED)
+
 # Source files
 file(GLOB srcs src/*.cpp src/base/*.cpp src/gui/*.cpp)
 file(GLOB include_sources src/base/*WIN32.cpp src/base/*POSIX.cpp)
@@ -8,7 +15,7 @@ list(REMOVE_ITEM srcs ${include_sources})
 
 add_executable(axpbox ${srcs} src/Main.cpp)
 target_include_directories(axpbox PRIVATE src src/base src/gui ${CMAKE_BINARY_DIR}/src)
-target_link_libraries(axpbox pthread)
+target_link_libraries(axpbox pthread Qt5::Core)
 
 # Configuration options
 include(CheckSymbolExists)
@@ -140,7 +147,6 @@ set(SELECT_TYPE_ARG1 "int")
 set(SELECT_TYPE_ARG234 "fd_set *")
 set(SELECT_TYPE_ARG5 "struct timeval *")
 set(RETSIGTYPE "void")
-set(STDC_HEADERS 1)
 check_include_files("time.h;sys/time.h" TIME_WITH_SYS_TIME)
 
 configure_file(src/config.h.in src/config.h)

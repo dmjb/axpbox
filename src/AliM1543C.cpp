@@ -483,9 +483,7 @@ void CAliM1543C::init() {
 
   lpt_reset();
 
-  myRegLock = new CMutex("ali-reg");
-
-  myThread = 0;
+  myThread = nullptr;
 
   printf("%s: $Id: AliM1543C.cpp,v 1.66 2008/05/31 15:47:07 iamcamiel Exp $\n",
          devid_string);
@@ -493,20 +491,17 @@ void CAliM1543C::init() {
 
 void CAliM1543C::start_threads() {
   if (!myThread) {
-    myThread = new CThread("ali");
-    printf(" %s", myThread->getName().c_str());
+    myThread = new CAliM1543C_Thread(this);
     StopThread = false;
-    myThread->start(*this);
+    myThread->start();
   }
 }
 
 void CAliM1543C::stop_threads() {
   StopThread = true;
   if (myThread) {
-    printf(" %s", myThread->getName().c_str());
-    myThread->join();
-    delete myThread;
-    myThread = 0;
+    myThread->wait();
+    myThread = nullptr;
   }
 }
 
@@ -975,19 +970,18 @@ void CAliM1543C::pit_clock() {
 /**
  * Thread entry point.
  **/
-void CAliM1543C::run() {
+void CAliM1543C_Thread::run() {
   try {
     for (;;) {
-      CThread::sleep(1);
-      if (StopThread)
+      QThread::sleep(1);
+      if (parent->StopThread)
         return;
-      do_pit_clock();
+      parent->do_pit_clock();
     }
   }
 
   catch (CException &e) {
-    printf("Exception in Ali thread: %s.\n", e.displayText().c_str());
-
+    printf("Exception in Ali thread: %s.\n", e.what());
     // Let the thread die...
   }
 }

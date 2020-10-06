@@ -102,6 +102,19 @@
 #include "Ethernet.h"
 #include <pcap.h>
 
+class CDEC21143;
+
+class CDEC21143_Thread : public QThread {
+Q_OBJECT
+  CDEC21143 *parent;
+
+  void run() override;
+
+public:
+  CDEC21143_Thread(CDEC21143 *parent)
+      : QThread(nullptr), parent(parent){};
+};
+
 /**
  * \brief Emulated DEC 21143 NIC device.
  *
@@ -112,7 +125,7 @@
  *(http://h30097.www3.hp.com/docs/dev_doc/DOCUMENTATION/HTML/dev_docs_r2.html)
  *  .
  **/
-class CDEC21143 : public CPCIDevice, public CRunnable {
+class CDEC21143 : public CPCIDevice {
 public:
   virtual int SaveState(FILE *f);
   virtual int RestoreState(FILE *f);
@@ -128,15 +141,16 @@ public:
   void ResetNIC();
   void SetupFilter();
   void receive_process();
-  virtual void run();
   virtual void init();
   virtual void start_threads();
   virtual void stop_threads();
 
 private:
+  friend class CDEC21143_Thread;
+
   static int nic_num;
 
-  CThread *myThread = nullptr;
+  CDEC21143_Thread *myThread = nullptr;
   bool StopThread;
 
   u32 nic_read(u32 address, int dsize);

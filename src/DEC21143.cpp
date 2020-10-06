@@ -171,37 +171,35 @@
 /**
  * Thread entry point.
  **/
-void CDEC21143::run() {
+void CDEC21143_Thread::run() {
   try {
     for (;;) {
-      if (StopThread)
+      if (parent->StopThread)
         return;
-      receive_process();
+      parent->receive_process();
 
       bool asserted;
 
-      if ((state.reg[CSR_OPMODE / 8] & OPMODE_ST))
-        while (dec21143_tx())
+      if ((parent->state.reg[CSR_OPMODE / 8] & OPMODE_ST))
+        while (parent->dec21143_tx())
           ;
 
       /*  Normal and Abnormal interrupt summary:  */
-      state.reg[CSR_STATUS / 8] &= ~(STATUS_NIS | STATUS_AIS);
-      if (state.reg[CSR_STATUS / 8] & state.reg[CSR_INTEN / 8] & 0x00004845)
-        state.reg[CSR_STATUS / 8] |= STATUS_NIS;
-      if (state.reg[CSR_STATUS / 8] & state.reg[CSR_INTEN / 8] & 0x0c0037ba)
-        state.reg[CSR_STATUS / 8] |= STATUS_AIS;
+      parent->state.reg[CSR_STATUS / 8] &= ~(STATUS_NIS | STATUS_AIS);
+      if (parent->state.reg[CSR_STATUS / 8] & parent->state.reg[CSR_INTEN / 8] & 0x00004845)
+        parent->state.reg[CSR_STATUS / 8] |= STATUS_NIS;
+      if (parent->state.reg[CSR_STATUS / 8] & parent->state.reg[CSR_INTEN / 8] & 0x0c0037ba)
+        parent->state.reg[CSR_STATUS / 8] |= STATUS_AIS;
 
-      asserted =
-          (state.reg[CSR_STATUS / 8] & state.reg[CSR_INTEN / 8] & 0x0c01ffff)
-              ? true
-              : false;
+      asserted = (parent->state.reg[CSR_STATUS / 8] &
+                  parent->state.reg[CSR_INTEN / 8] & 0x0c01ffff) != 0;
 
-      if (asserted != state.irq_was_asserted) {
-        if (do_pci_interrupt(0, asserted))
-          state.irq_was_asserted = asserted;
+      if (asserted != parent->state.irq_was_asserted) {
+        if (parent->do_pci_interrupt(0, asserted))
+          parent->state.irq_was_asserted = asserted;
       }
 
-      CThread::sleep(10);
+      QThread::sleep(10);
     }
   }
 
@@ -510,18 +508,16 @@ void CDEC21143::init() {
 
 void CDEC21143::start_threads() {
   if (!myThread) {
-    myThread = new CThread("nic");
-    printf(" %s", myThread->getName().c_str());
+    myThread = new CDEC21143_Thread(this);
     StopThread = false;
-    myThread->start(*this);
+    myThread->start();
   }
 }
 
 void CDEC21143::stop_threads() {
   StopThread = true;
   if (myThread) {
-    printf(" %s", myThread->getName().c_str());
-    myThread->join();
+    myThread->wait();
     delete myThread;
     myThread = 0;
   }

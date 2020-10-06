@@ -355,22 +355,22 @@
 #if !defined(HAVE_NEW_FP)
 #include "es40_float.h"
 #endif
-void CAlphaCPU::release_threads() { mySemaphore.set(); }
+void CAlphaCPU::release_threads() { mySemaphore.release(); }
 
-void CAlphaCPU::run() {
+void CAlphaCPU_Thread::run() {
   try {
-    mySemaphore.wait();
-    while (state.wait_for_start) {
-      if (StopThread)
+    parent->mySemaphore.acquire();
+    while (parent->state.wait_for_start) {
+      if (parent->StopThread)
         return;
       CThread::sleep(1);
     }
-    printf("*** CPU%d *** STARTING ***\n", get_cpuid());
+    printf("*** CPU%d *** STARTING ***\n", parent->get_cpuid());
     for (;;) {
-      if (StopThread)
+      if (parent->StopThread)
         return;
       for (int i = 0; i < 1000000; i++)
-        execute();
+        parent->execute();
     }
   } catch (CException &e) {
     printf("Exception in CPU thread: %s.\n", e.displayText().c_str());
@@ -383,7 +383,7 @@ void CAlphaCPU::run() {
  * Constructor.
  **/
 CAlphaCPU::CAlphaCPU(CConfigurator *cfg, CSystem *system)
-    : CSystemComponent(cfg, system), mySemaphore(0, 1) {}
+    : CSystemComponent(cfg, system), mySemaphore(0) {}
 
 /**
  * Initialize the CPU.
@@ -442,27 +442,25 @@ void CAlphaCPU::init() {
 
 void CAlphaCPU::start_threads() {
   char buffer[5];
-  mySemaphore.tryWait(1);
+  mySemaphore.tryAcquire(1);
   if (!myThread) {
     sprintf(buffer, "cpu%d", state.iProcNum);
-    myThread = new CThread(buffer);
-    printf(" %s", myThread->getName().c_str());
+    myThread = new CAlphaCPU_Thread(this);
     StopThread = false;
-    myThread->start(*this);
+    myThread->start();
   }
 }
 
 void CAlphaCPU::stop_threads() {
   StopThread = true;
   if (myThread) {
-    mySemaphore.set();
-    printf(" %s", myThread->getName().c_str());
-    myThread->join();
+    mySemaphore.release();
+    myThread->wait();
     delete myThread;
     myThread = 0;
   }
 
-  mySemaphore.tryWait(1);
+  mySemaphore.tryAcquire(1);
 }
 
 /**

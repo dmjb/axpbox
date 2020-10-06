@@ -81,6 +81,19 @@
 #define VIDEO_RAM_SIZE 22
 #define CRTC_MAX 0x57
 
+class CCirrus;
+
+class CCirrus_Thread : public QThread {
+Q_OBJECT
+  CCirrus *parent;
+
+  void run() override;
+
+public:
+  CCirrus_Thread(CCirrus *parent)
+      : QThread(nullptr), parent(parent){};
+};
+
 /**
  * \brief Cirrus Video Card
  *
@@ -89,7 +102,7 @@
  *   (http://home.worldonline.dk/~finth/)
  *  .
  **/
-class CCirrus : public CVGA, public CRunnable {
+class CCirrus : public CVGA {
 public:
   virtual int SaveState(FILE *f);
   virtual int RestoreState(FILE *f);
@@ -105,7 +118,6 @@ public:
   virtual ~CCirrus();
 
   void update(void);
-  void run(void);
 
   virtual void init();
   virtual void start_threads();
@@ -116,6 +128,8 @@ public:
                            unsigned height);
 
 private:
+  friend class CCirrus_Thread;
+
   u32 mem_read(u32 address, int dsize);
   void mem_write(u32 address, int dsize, u32 data);
 
@@ -164,7 +178,7 @@ private:
   void vga_mem_write(u32 addr, u8 value);
   u8 vga_mem_read(u32 addr);
 
-  CThread *myThread = nullptr;
+  CCirrus_Thread *myThread = nullptr;
   bool StopThread;
 
   /// The state structure contains all elements that need to be saved to the

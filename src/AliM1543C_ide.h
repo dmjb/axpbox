@@ -171,10 +171,22 @@
  *  - Mt. Fuji Commands for Multimedia Devices Version 7 INF-8090i v7
  *  .
  **/
+class CAliM1543C_ide;
+
+class CAliM1543C_ide_Thread : public QThread {
+  Q_OBJECT
+  CAliM1543C_ide *parent;
+
+  void run() override;
+
+public:
+  CAliM1543C_ide_Thread(CAliM1543C_ide *parent)
+      : QThread(nullptr), parent(parent){};
+};
+
 class CAliM1543C_ide : public CPCIDevice,
                        public CDiskController,
-                       public CSCSIDevice,
-                       public CRunnable {
+                       public CSCSIDevice {
 public:
   CAliM1543C_ide(CConfigurator *cfg, class CSystem *c, int pcibus, int pcidev);
   virtual ~CAliM1543C_ide();
@@ -193,12 +205,13 @@ public:
   virtual void check_state();
   virtual void ResetPCI();
 
-  virtual void run();
   virtual void init();
   virtual void start_threads();
   virtual void stop_threads();
 
 private:
+  friend class CAliM1543C_ide_Thread;
+
   // IDE controller
   u32 ide_command_read(int channel, u32 address, int dsize);
   void ide_command_write(int channel, u32 address, int dsize, u32 data);
@@ -217,13 +230,13 @@ private:
 
   void execute(int index);
 
-  CThread *thrController[2];          // one thread for each controller chip
-  CSemaphore *semController[2];       // controller start/stop
-  CSemaphore *semControllerReady[2];  // controller ready
-  CSemaphore *semBusMaster[2];        // bus master start/stop
-  CSemaphore *semBusMasterReady[2];   // bus master ready
-  CRWLock *mtRegisters[2];            // main registers
-  CRWLock *mtBusMaster[2];            // busmaster registers
+  CAliM1543C_ide_Thread *thrController[2];  // one thread for each controller
+  QSemaphore *semController[2];             // controller start/stop
+  QSemaphore *semControllerReady[2];        // controller ready
+  QSemaphore *semBusMaster[2];              // bus master start/stop
+  QSemaphore *semBusMasterReady[2];         // bus master ready
+  QReadWriteLock *mtRegisters[2];           // main registers
+  QReadWriteLock *mtBusMaster[2];           // busmaster registers
   bool StopThread;
 
   bool usedma;
@@ -342,8 +355,9 @@ private:
 // Update alt-status for controller a with locking
 #define UPDATE_ALT_STATUS(a)                                                   \
   {                                                                            \
-    SCOPED_WRITE_LOCK(mtRegisters[a]);                                         \
+    mtRegisters[a]->lockForWrite();                                            \
     SEL_STATUS(a).alt_status = get_status(a);                                  \
+    mtRegisters[a]->unlock();                                                  \
   }
 
 /* memory region ids */
